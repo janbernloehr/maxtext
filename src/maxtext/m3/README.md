@@ -77,5 +77,7 @@ bearing for that second driver — breaking them tends to fail silently:
 ## Tests
 
 Unit tests live in `tests/unit/m3/`, integration tests in `tests/integration/m3/`. They are picked
-up by the standard MaxText pytest markers and run on every PR — no workflow changes are needed to
-add a test file.
+up by the standard MaxText pytest markers — no workflow changes are needed to add a test file. CPU
+tests run on every PR; TPU/GPU tests run once the PR is marked "Ready for review" and no longer has
+the `skip-ci-tests` label. Every new PR gets that label automatically; a bot removes it after 2
+approvals once the other checks pass, or you can remove it yourself to run them sooner.

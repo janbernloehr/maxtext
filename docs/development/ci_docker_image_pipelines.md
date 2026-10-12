@@ -40,8 +40,12 @@ Nothing else builds an image:
   (`ci_pipeline.yml`) builds a wheel from your commit (about 35 seconds), starts a
   container from the prebuilt `maxtext-unit-test-tpu` / `maxtext-unit-test-cuda12`
   base image, installs the wheel into a fresh virtual environment (about 20 seconds)
-  and runs the tests. Pushing a fix re-runs everything in roughly 1.5 minutes plus
-  test time, and a push cancels the previous in-progress run for the same PR.
+  and runs the tests. Pushing a fix re-runs the CPU suites (and, once the PR is
+  ready for review and no longer has the `skip-ci-tests` label, the TPU/GPU suites)
+  in roughly 1.5 minutes plus test time, and a push cancels the previous
+  in-progress run for the same PR. Every new PR gets that label automatically; a
+  bot removes it after 2 approvals once the other checks pass, or you can remove
+  it yourself to run the TPU/GPU suites sooner.
 - The `maxtext-unit-test-*` base images contain only system packages, Python, pip
   and uv. They are built by hand from `src/dependencies/dockerfiles/clean_py_env*.Dockerfile`
   and pushed rarely.

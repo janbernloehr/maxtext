@@ -25,7 +25,17 @@ This label is used for administrative purposes. Please do not add it manually.
 
 *Notice 3:* Tests marked `scheduled_only` are skipped on PRs and only run in the periodic scheduled CI.
 If you need them (plus the TPU7X suite) on your PR, add the `scheduled-only` label; the full pipeline
-re-runs as a scheduled run. Remove and re-add the label to trigger it again.
+re-runs as a scheduled run. Remove and re-add the label to trigger it again. On a draft PR the CPU
+suites, build, code quality and docs re-run; the TPU/GPU suites (including TPU7X) and notebooks wait
+until the PR is marked "Ready for review".
+
+*Notice 4:* Every new PR gets the `skip-ci-tests` label automatically. While a PR has it, the heavy TPU/GPU
+suites (including the notebook tests) are skipped unless the PR also has `scheduled-only`; the CPU tests,
+package build, docs and linters still run. If your change needs the heavy suites, the "Full CI Gatekeeper"
+check fails and blocks the merge until they have run. After 2 approvals, once the PR has a single commit and
+the other checks pass, a bot removes the label, which runs all tests. To run them sooner, remove the label
+yourself (or ask a maintainer). Draft PRs never run the heavy suites, so convert your PR back to a draft to
+iterate.
 
 # Tests
 

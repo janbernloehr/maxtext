@@ -30,7 +30,7 @@ ______________________________________________________________________
 
 ## How the Test Works
 
-This test runs automatically as part of the [`tpu-integration`](https://github.com/AI-Hypercomputer/maxtext/actions/workflows/ci_pipeline.yml) CI test suite on every Pull Request.
+This test runs automatically as part of the [`tpu-integration`](https://github.com/AI-Hypercomputer/maxtext/actions/workflows/ci_pipeline.yml) CI test suite in scheduled runs and on every Pull Request that is marked "Ready for review" and no longer has the `skip-ci-tests` label. Every new PR gets that label automatically; a bot removes it after 2 approvals once the other checks pass, or you can remove it yourself to run this test sooner.
 
 When the test method executes, it performs the following sequence of actions:
 
