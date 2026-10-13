@@ -35,6 +35,12 @@ from maxtext.checkpoint_conversion.utils.utils import process_maxtext_param
 
 class ParamMappingTest(unittest.TestCase):
 
+  def test_every_hf_model_config_has_mapping_and_hooks(self):
+    # to_maxtext and safetensors_dynamic look up all three tables with the same model_name.
+    configs = set(hf_model_configs.HF_MODEL_CONFIGS)
+    self.assertEqual(configs - set(param_mapping.PARAM_MAPPING), set())
+    self.assertEqual(configs - set(param_mapping.HOOK_FNS), set())
+
   def test_gemma3_mapping_unscanned(self):
     config = {
         "text_config": {"num_hidden_layers": 2, "hidden_size": 256},
