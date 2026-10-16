@@ -15,6 +15,7 @@
 """Tensor handling utility functions for checkpoint conversion."""
 
 from functools import partial
+import math
 from typing import Any, Callable, List
 import jax
 import jax.numpy as np
@@ -31,6 +32,20 @@ def apply_hook_fns(weight, target_shape, hook_fns):
   for hook_fn in hook_fns:
     weight = hook_fn(weight, target_shape)
   return weight
+
+
+def _split_over_all_devices(tensor) -> bool:
+  """Returns True if `tensor` is a `jax.Array` split over all devices, with no copies.
+
+  Such a tensor is stacked as read and resharded once with its whole stack. Resharding each tensor alone
+  costs one collective per tensor: an all-to-all if the hook transposes the split axis (e.g. MoE `wi_0`),
+  about 0.1 s each on two v5e-256 slices, or 25 min for the 15k `wi_0` tensors of DeepSeek-V3.
+  """
+  if not isinstance(tensor, jax.Array):
+    return False
+  num_devices = len(tensor.sharding.device_set)
+  shard_size = math.prod(tensor.sharding.shard_shape(tensor.shape))
+  return num_devices == jax.device_count() and shard_size * num_devices == tensor.size
 
 
 def nesting_depth(hf_source_keys: Any) -> int:
@@ -140,6 +155,8 @@ def _build_multi_axis_stacked_tensor(
       # A tuple of keys is a composite HF source that the hook fuses into one leaf.
       raw = tuple(tensor_getter_fn(k) for k in keys) if isinstance(keys, tuple) else tensor_getter_fn(keys)
       tensor = apply_hook_fns(raw, mt_slice_shape, hook_fns)
+      if _split_over_all_devices(tensor):
+        return tensor
     else:
       tensor = _binary_chunked_stack([gather(sub, level + 1) for sub in keys], axis=0)
     if target_sharding is not None and level > 0:
@@ -199,7 +216,7 @@ def _build_single_axis_stacked_tensor(
     hf_tensor_numpy = tensor_getter_fn(hf_key_single)
     processed_hf_tensor = apply_hook_fns(hf_tensor_numpy, mt_slice_shape, hook_fns)
 
-    if target_sharding is not None:
+    if target_sharding is not None and not _split_over_all_devices(processed_hf_tensor):
       processed_hf_tensor = jax.device_put(processed_hf_tensor, slice_sharding)
     tensors_to_stack.append(processed_hf_tensor)
 
