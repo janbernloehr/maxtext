@@ -20,11 +20,11 @@ import io
 import json
 import os
 import pathlib
-import subprocess
 import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 import pytest
 
 spec = importlib.util.spec_from_file_location("class_split", "tests/utils/class_split.py")
@@ -295,34 +295,43 @@ class ClassSplitEndToEndTest(unittest.TestCase):
 
   def _collect(self, workdir, *args):
     """Returns the nodeids that `pytest --collect-only` keeps from the sample module."""
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(REPO_ROOT), env.get("PYTHONPATH")]))
-    process = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "--collect-only",
-            "-q",
-            "-p",
-            "tests.conftest",
-            "-c",
-            str(REPO_ROOT / "pytest.ini"),
-            f"--rootdir={workdir}",
-            "-m",
-            "not integration_test",
-            *args,
-            "sample_test.py",
-        ],
-        cwd=workdir,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        check=False,
-    )
-    self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
-    return [line for line in process.stdout.splitlines() if line.startswith("sample_test.py::")]
+    out = io.StringIO()
+    err = io.StringIO()
+    added_repo_root = str(REPO_ROOT) not in sys.path
+    if added_repo_root:
+      sys.path.insert(0, str(REPO_ROOT))
+    sys.modules.pop("sample_test", None)
+    try:
+      with (
+          mock.patch.dict(os.environ, {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTEST_ADDOPTS": ""}),
+          contextlib.chdir(workdir),
+          contextlib.redirect_stdout(out),
+          contextlib.redirect_stderr(err),
+      ):
+        returncode = pytest.main(
+            [
+                "--collect-only",
+                "-q",
+                "-s",
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "tests.conftest",
+                "-c",
+                str(REPO_ROOT / "pytest.ini"),
+                f"--rootdir={workdir}",
+                "-m",
+                "not integration_test",
+                *args,
+                "sample_test.py",
+            ]
+        )
+    finally:
+      sys.modules.pop("sample_test", None)
+      if added_repo_root and str(REPO_ROOT) in sys.path:
+        sys.path.remove(str(REPO_ROOT))
+    self.assertEqual(int(returncode), 0, out.getvalue() + err.getvalue())
+    return [line for line in out.getvalue().splitlines() if line.startswith("sample_test.py::")]
 
   def test_options_register_and_the_split_runs_after_marker_deselection(self):
     with tempfile.TemporaryDirectory() as tmpdir:

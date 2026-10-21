@@ -227,6 +227,7 @@ EXCLUDED_FILES=(
   '\.github/workflows/update_changelog.yml$'
   '^\.github/scripts/'
   '^tools/'
+  '^tests/dev/'
   '\.md$'
   'src/maxtext/version.py$'
 )
