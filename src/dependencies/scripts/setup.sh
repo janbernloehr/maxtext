@@ -263,7 +263,13 @@ install_maxtext_with_deps() {
         dep_name='src/dependencies/requirements/generated_requirements/tpu-requirements.txt'
     fi
     echo "Installing requirements from $dep_name"
-    python3 -m uv pip install --resolution=lowest -r "$dep_name"
+    local build_constraint_args=()
+    if [[ "$DEVICE" == "gpu" && "$MODE" == "stable" ]]; then
+        grep -E '^jax(lib|-cuda12-pjrt|-cuda12-plugin)?>=' "$dep_name" | sed 's/>=/==/' > /tmp/gpu-build-constraints.txt
+        build_constraint_args=(--build-constraints /tmp/gpu-build-constraints.txt)
+    fi
+    python3 -m uv pip install --resolution=lowest "${build_constraint_args[@]}" -r "$dep_name"
+    rm -f /tmp/gpu-build-constraints.txt
     if [[ "$TF" == "true" ]]; then
         python3 -m src.dependencies.scripts.install_pre_train_extra_deps --with-tf
     else
