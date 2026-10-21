@@ -15,6 +15,7 @@
 """Operations used by Grain"""
 
 import dataclasses
+import re
 import warnings
 from threading import current_thread
 from typing import Any, Iterable, TYPE_CHECKING
@@ -29,6 +30,7 @@ from grain._src.python.dataset.sources.tfrecord_dataset import _TFRecordReader, 
 from grain.experimental import TFRecordIterDataset
 from maxtext.diffusion.block_diffusion import corruption as block_diffusion_corruption
 from maxtext.input_pipeline.protos import example_pb2
+from maxtext.input_pipeline import encoding_dsv4
 from maxtext.input_pipeline import tokenizer
 from maxtext.multimodal import processor as mm_processor
 from maxtext.multimodal import utils as mm_utils
@@ -298,7 +300,76 @@ def _get_completion_in_chat_template(tokenizer_model, round_msgs):
   return completion_str
 
 
-def apply_chat_template(example, tokenizer_model, data_column_name):
+_DS4_TURN_RE = re.compile(
+    re.escape(encoding_dsv4.ASSISTANT_SP_TOKEN)
+    + f"({re.escape(encoding_dsv4.thinking_start_token)}|"
+    + f"{re.escape(encoding_dsv4.thinking_end_token)})"
+    + f"(.*?{re.escape(encoding_dsv4.eos_token)})",
+    re.DOTALL,
+)
+
+
+def _is_deepseek_v4(tokenizer_model, model_name=None) -> bool:
+  """Detects DeepSeek-V4 by model or tokenizer name.
+
+  Vocabulary checks are not used: the DeepSeek-V3.2 tokenizer has the same special tokens and
+  also ships without a chat template, but uses a different encoding.
+  """
+  for name in (model_name, getattr(tokenizer_model, "model_name", None), getattr(tokenizer_model, "name_or_path", None)):
+    if name and any(x in str(name).lower() for x in ("deepseek4", "deepseek-v4", "deepseek_v4")):
+      return True
+  return False
+
+
+def _format_conversations_dsv4(example, data_column_name):
+  """Formats DeepSeek-V4 conversational data using encoding_dsv4.encode_messages."""
+  raw_messages = example[data_column_name]
+  for idx, message in enumerate(raw_messages):
+    if message.get("role") == "system" and idx != 0:
+      raise ValueError(f"System message found at index {idx}. System messages must be at index 0.")
+
+  assistants = [m for m in raw_messages if m.get("role") == "assistant"]
+  if not assistants:
+    example["is_prompt"] = []
+    example[data_column_name] = []
+    return example
+
+  last_assistant_idx = max(i for i, m in enumerate(raw_messages) if m.get("role") == "assistant")
+  messages_to_encode = raw_messages[: last_assistant_idx + 1]
+  thinking_mode = "thinking" if any(m.get("reasoning_content") for m in messages_to_encode) else "chat"
+  text = encoding_dsv4.encode_messages(messages_to_encode, thinking_mode=thinking_mode)
+  matches = list(_DS4_TURN_RE.finditer(text))
+  if len(matches) != len(assistants):
+    raise ValueError(
+        f"Mismatch between number of assistant messages ({len(assistants)}) "
+        f"and encoded turns ({len(matches)}). Encoded text: {text!r}"
+    )
+
+  messages = []
+  is_prompt = []
+  cursor = 0
+  for match in matches:
+    # In thinking mode, encode_messages drops the reasoning of assistant turns before the last user
+    # message and renders them after `</think>`. Keep those turns in the prompt so that only turns
+    # with their reasoning are trained.
+    if thinking_mode == "thinking" and match.group(1) == encoding_dsv4.thinking_end_token:
+      continue
+    messages.extend([text[cursor : match.start(2)], match.group(2)])
+    is_prompt.extend([True, False])
+    cursor = match.end(2)
+
+  if cursor != len(text):
+    raise ValueError(
+        f"Encoded text length ({len(text)}) does not match completion boundary ({cursor}). "
+        f"Trailing conversation content after the final assistant turn was dropped: {text[cursor:]!r}"
+    )
+
+  example["is_prompt"] = is_prompt
+  example[data_column_name] = messages
+  return example
+
+
+def apply_chat_template(example, tokenizer_model, data_column_name, model_name=None):
   """Formats conversational data by applying the tokenizer's chat template
   and identifying prompt/completion segments for SFT masking.
 
@@ -319,6 +390,8 @@ def apply_chat_template(example, tokenizer_model, data_column_name):
         prompt (if applicable). `False` indicates the expected LLM
         completion, excluding the assistant's start tokens.
   """
+  if getattr(tokenizer_model, "chat_template", None) is None and _is_deepseek_v4(tokenizer_model, model_name):
+    return _format_conversations_dsv4(example, data_column_name)
   messages = []
   is_prompt = []
   round_msgs = []
