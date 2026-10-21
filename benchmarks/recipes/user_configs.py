@@ -27,6 +27,7 @@ from typing import Any
 from benchmarks import maxtext_trillium_model_configs as v6e_model_configs
 from benchmarks import maxtext_v5e_model_configs as v5e_model_configs
 from benchmarks import maxtext_v5p_model_configs as v5p_model_configs
+from benchmarks.recipes import parser_utils
 from benchmarks.recipes.pw_utils import build_user_models, get_cluster_config, get_pathways_config
 
 
@@ -82,6 +83,29 @@ class UserConfig:
   workload_id: str = None
   skip_validation: bool = False
 
+  # MaxText training overrides (None = not set). Must match parser_utils.MAXTEXT_FLAG_SPECS.
+  # Elastic training
+  elastic_enabled: bool | None = None
+  enable_single_controller: bool | None = None
+  elastic_min_slice_count: int | None = None
+  # Goodput
+  enable_pathways_goodput: bool | None = None
+  enable_goodput_recording: bool | None = None
+  goodput_upload_interval_seconds: int | None = None
+  monitor_goodput: bool | None = None
+  # Checkpointing
+  enable_checkpointing: bool | None = None
+  async_checkpointing: bool | None = None
+  enable_checkpoint_cloud_logger: bool | None = None
+  checkpoint_period: int | None = None
+  # Colocated Python data input / dataset
+  colocated_python_data_input: bool | None = None
+  tokenizer_path: str | None = None
+  dataset_type: str | None = None
+  grain_train_files: str | None = None
+  # Generic MaxText key=value overrides (value None = remove key from the model config).
+  maxtext_overrides: dict[str, Any] = dataclasses.field(default_factory=dict)
+
   # Derived attributes initialized in __post_init__
   cluster_config: Any = dataclasses.field(init=False, default=None)
   region: str = dataclasses.field(init=False, default="")
@@ -124,6 +148,18 @@ class UserConfig:
         AVAILABLE_MODELS_FRAMEWORKS,
         AVAILABLE_MODELS,
     )
+    # Fail fast on conflicting overrides, before any cluster interaction.
+    self.tuning_param_overrides()
+
+  def tuning_param_overrides(self) -> dict[str, Any]:
+    """Returns MaxText overrides: --maxtext_override entries plus the typed flags that are set."""
+    typed = {name: getattr(self, name) for name in parser_utils.MAXTEXT_FLAG_NAMES if getattr(self, name) is not None}
+    conflicts = sorted(
+        k for k in typed.keys() & self.maxtext_overrides.keys() if str(typed[k]) != str(self.maxtext_overrides[k])
+    )
+    if conflicts:
+      raise ValueError(f"Conflicting values for {conflicts} between typed flags and --maxtext_override.")
+    return {**self.maxtext_overrides, **typed}
 
 
 # Define the required configuration here
